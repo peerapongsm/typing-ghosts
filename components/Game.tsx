@@ -53,6 +53,8 @@ export default function Game() {
   const [announcement, setAnnouncement] = useState<{ type: GhostType; nonce: number } | null>(null);
   const [wrongFlash, setWrongFlash] = useState<{ id: string; nonce: number } | null>(null);
   const [finalStats, setFinalStats] = useState<{ wpm: number; accuracy: number } | null>(null);
+  const [comboBurst, setComboBurst] = useState<{ nonce: number } | null>(null);
+  const prevComboRef = useRef(0);
 
   const [, bump] = useReducer((c: number) => c + 1, 0);
 
@@ -74,6 +76,16 @@ export default function Game() {
 
   useEffect(() => {
     setBest(getBestScore());
+  }, []);
+
+  // Design-review aid: ?screenshot=play auto-starts the run so headless
+  // capture tools can land on the arena without simulating a click.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("screenshot") === "play") {
+      startGame();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function clearAllTimers() {
@@ -100,6 +112,8 @@ export default function Game() {
     setFinalStats(null);
     setAnnouncement(null);
     setWrongFlash(null);
+    setComboBurst(null);
+    prevComboRef.current = 0;
     screenRef.current = "playing";
     setScreen("playing");
     bump();
@@ -259,6 +273,14 @@ export default function Game() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hearts, screen]);
 
+  // Combo streak firework burst.
+  useEffect(() => {
+    if (screen === "playing" && score.combo > 1 && score.combo > prevComboRef.current) {
+      setComboBurst({ nonce: Date.now() });
+    }
+    prevComboRef.current = score.combo;
+  }, [score.combo, screen]);
+
   // Visual animation loop (position only; game logic runs on timeouts above).
   useEffect(() => {
     if (screen !== "playing") return;
@@ -331,9 +353,10 @@ export default function Game() {
         aria-label="พิมพ์คำภาษาไทยเพื่อไล่ผี"
       />
 
-      <Hud hearts={hearts} score={score.score} combo={score.combo} wave={wave} />
+      <Hud hearts={hearts} score={score.score} combo={score.combo} wave={wave} comboBurst={comboBurst} />
 
       <div className="arena">
+        <div className="arena-fog" aria-hidden="true" />
         <div className="shrine" aria-hidden="true">
           <ShrineIcon />
         </div>
@@ -347,11 +370,16 @@ export default function Game() {
           const progress = isTarget ? target.progress : 0;
           const shake = wrongFlash?.id === g.id;
           const GhostSvg = GHOST_SVGS[g.type];
+          const glowStyle = {
+            left: `${left}%`,
+            top: `${top}%`,
+            "--ghost-glow": GHOST_CONFIG[g.type].accent,
+          } as React.CSSProperties;
           return (
             <div
               key={g.id}
               className={`ghost${isTarget ? " ghost-locked" : ""}`}
-              style={{ left: `${left}%`, top: `${top}%` }}
+              style={glowStyle}
             >
               <GhostSvg className="ghost-svg" />
               <WordLabel
@@ -415,11 +443,13 @@ function Hud({
   score,
   combo,
   wave,
+  comboBurst,
 }: {
   hearts: number;
   score: number;
   combo: number;
   wave: number;
+  comboBurst: { nonce: number } | null;
 }) {
   return (
     <div className="hud">
@@ -431,7 +461,16 @@ function Hud({
         ))}
       </div>
       <div className="hud-score">คะแนน {score.toLocaleString("th-TH")}</div>
-      <div className="hud-combo">คอมโบ {combo}</div>
+      <div className="hud-combo-wrap">
+        <div className="hud-combo">คอมโบ {combo}</div>
+        {comboBurst && (
+          <div className="combo-burst" key={comboBurst.nonce} aria-hidden="true">
+            {Array.from({ length: 8 }, (_, i) => (
+              <span className="spark" style={{ "--i": i } as React.CSSProperties} key={i} />
+            ))}
+          </div>
+        )}
+      </div>
       <div className="hud-wave">ด่าน {wave}</div>
     </div>
   );
@@ -439,10 +478,22 @@ function Hud({
 
 function ShrineIcon() {
   return (
-    <svg viewBox="0 0 100 100" className="shrine-svg">
-      <path d="M20 90 L20 55 L80 55 L80 90 Z" fill="#c9a876" />
-      <path d="M10 55 L50 25 L90 55 Z" fill="#a8624b" />
-      <rect x="44" y="65" width="12" height="25" fill="#7a5a3a" />
+    <svg viewBox="0 0 100 116" className="shrine-svg">
+      {/* Thai gable roof, curved finials */}
+      <path d="M50 4 L54 14 L46 14 Z" fill="#ffd76a" />
+      <path d="M16 40 L50 12 L84 40 Z" fill="#b3392f" stroke="#7a2020" strokeWidth="1.5" />
+      <path d="M16 40 Q10 44 8 52" stroke="#7a2020" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      <path d="M84 40 Q90 44 92 52" stroke="#7a2020" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      {/* house body */}
+      <rect x="26" y="40" width="48" height="22" rx="2" fill="#8a2f2f" stroke="#ffd76a" strokeWidth="1.5" />
+      <rect x="42" y="46" width="16" height="16" fill="#ffb347" opacity="0.9" />
+      {/* single central pillar (ศาลพระภูมิ) */}
+      <rect x="45" y="62" width="10" height="34" fill="#8a5a2a" />
+      {/* offering platform */}
+      <rect x="14" y="96" width="72" height="9" rx="2" fill="#c9a876" stroke="#8a6a3a" strokeWidth="1" />
+      {/* candle */}
+      <rect x="66" y="90" width="4" height="8" fill="#f4ead0" />
+      <path className="candle-flame" d="M68 84 Q71 88 68 92 Q65 88 68 84 Z" fill="#ffcf6b" />
     </svg>
   );
 }
